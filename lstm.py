@@ -11,22 +11,27 @@ class LSTMClassifier:
             hidden_size: int,
             vocab_size: int,
             n_cells: int = 1,
+            album_count: int = 11,
+            album_embedding_size: int = 64
     ) -> None:
 
         self.embed_size = embed_size
         self.hidden_size = hidden_size
         self.vocab_size = vocab_size
         self.n_cells = n_cells
+        self.album_count = album_count
+        self.album_embedding_size = album_embedding_size
         self.layers = dict()
 
         self.layers["embedding"] = np.empty((vocab_size, embed_size))
+        self.layers["album_embedding"] = np.empty((album_count, album_embedding_size))
 
         for cell_index in range(n_cells):
 
             for layer_name in ["f", "o", "c"]:
 
                 linp_sz = hidden_size + (
-                    embed_size if cell_index == 0 else hidden_size
+                    embed_size + album_embedding_size if cell_index == 0 else hidden_size
                 )
 
                 self.layers[f"W{layer_name}_{cell_index}"] = np.empty(
@@ -66,7 +71,7 @@ class LSTMClassifier:
         return state
 
     def forward(
-            self, inputs, state=None, teacher_forcing=True, generation_length=0
+            self, inputs, album_id, state=None, teacher_forcing=True, generation_length=0
     ):
         batch_sz, seq_len = inputs.shape[:2]
 
@@ -76,8 +81,10 @@ class LSTMClassifier:
         n_timestamps = seq_len + generation_length
 
         activations = defaultdict(lambda: defaultdict(list))
+        activations["album_id"] = album_id
 
         outputs = np.zeros((batch_sz, n_timestamps, self.vocab_size))
+        album_feats = self.layers["album_embedding"][album_id]
 
         if state is None:
             state = self.init_state(batch_sz)
@@ -92,8 +99,10 @@ class LSTMClassifier:
                 word_indices = np.argmax(outputs[:, timestep - 1], axis=1)
             else:
                 word_indices = inputs[:, timestep]
-            features = self.layers["embedding"][word_indices]
+            word_feats = self.layers["embedding"][word_indices]
             activations["input"][timestep] = word_indices
+
+            features = np.concatenate((word_feats, album_feats), axis=-1)
 
             for cell_idx in range(self.n_cells):
 
@@ -205,7 +214,11 @@ class LSTMClassifier:
                 grad_next["h"][cell_idx] = dh_prev
 
             word_indices = activations["input"][timestep]
-            self.grad["embedding"][word_indices] += dinp
+            d_word = dinp[:, :self.embed_size]
+            d_album = dinp[:, self.embed_size:self.embed_size + self.album_embedding_size]
+            self.grad["embedding"][word_indices] += d_word
+            album_ids = activations["album_id"]
+            self.grad["album_embedding"][album_ids] += d_album
 
     @property
     def state_dict(self):
@@ -215,6 +228,8 @@ class LSTMClassifier:
                 hidden_size=self.hidden_size,
                 vocab_size=self.vocab_size,
                 n_cells=self.n_cells,
+                album_count=self.album_count,
+                album_embedding_size=self.album_embedding_size
             ),
             weights=deepcopy(self.layers),
             grad=deepcopy(self.grad),

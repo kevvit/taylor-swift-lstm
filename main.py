@@ -33,7 +33,7 @@ ts_df['cleaned_lyrics'] = ts_df['song_lyrics'].apply(process_cell).apply(clean_l
 choices = {'1': 'Taylor Swift', '2': 'Fearless', '3': 'Speak Now', '4': 'Red', '5': '1989', '6':
     'reputation', '7': 'Lover', '8': 'folklore', '9': 'evermore', '10': 'Midnights', '11': 'The Tortured Poets Department'}
 
-album_name = input("Choose album (enter number): "
+album_id = input("Choose album (enter number): "
                    "\n 1: Taylor Swift"
                    "\n 2: Fearless"
                    "\n 3: Speak Now"
@@ -45,9 +45,7 @@ album_name = input("Choose album (enter number): "
                    "\n 9: evermore"
                    "\n 10: Midnights"
                    "\n 11: The Tortured Poets Department\n")
-
-data = album_lyrics = " ".join(ts_df[ts_df['category'] == choices.get(album_name, 'Taylor Swift')]['cleaned_lyrics'])
-print(data)
+data = album_lyrics = " ".join(ts_df[ts_df['category'] == choices.get(album_id, 'Taylor Swift')]['cleaned_lyrics'])
 char_data = np.array(list(data))
 encoder = LabelEncoder()
 indices_data = encoder.fit_transform(char_data)
@@ -64,6 +62,9 @@ EMBED_SIZE = 256
 HIDDEN_SIZE = 256
 NUM_LAYERS = 2
 NUM_EPOCHS = 5
+
+
+album = np.array([int(album_id)] * BATCH_SIZE)
 
 trainset_size = int(len(indices_data) * TRAIN_SPLIT)
 train_data = indices_data[:trainset_size]
@@ -88,7 +89,7 @@ def train():
         for inputs, targets in (pbar := tqdm(trainloader, leave=False)):
             if SHUFFLE_TRAIN:
                 state = None
-            probabilities, state, activations = model.forward(inputs, state)
+            probabilities, state, activations = model.forward(inputs, album, state)
 
             # cross entropy loss
             loss = cross_entropy(probabilities, targets)
@@ -120,7 +121,7 @@ def train():
         for iter, (inputs, targets) in (pbar := tqdm(enumerate(testloader),
                                                      leave=False)):
             probabilities, state, _ = model.forward(
-                inputs, state=None, teacher_forcing=False
+                inputs, album, state=None, teacher_forcing=False
             )
             loss = cross_entropy(probabilities, targets)
             accuracy = np.mean(np.argmax(probabilities, axis=-1) == targets)
@@ -143,7 +144,7 @@ def generate(model, prefix: str, length: int):
     state = None
 
     probabilities, state, _ = model.forward(
-        inputs, state, teacher_forcing=False, generation_length=length
+        inputs, album, state, teacher_forcing=False, generation_length=length
     )
     tokens = np.argmax(probabilities[0, len(prefix) - 1 :], axis=-1)
 
